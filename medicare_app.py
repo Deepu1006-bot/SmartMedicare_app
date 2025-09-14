@@ -2,25 +2,25 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 
+# Connect to SQLite Database
 conn = sqlite3.connect("healthcare.db", check_same_thread=False)
 cur = conn.cursor()
-cur.execute("CREATE TABLE IF NOT EXISTS patients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, age INTEGER, gender TEXT, district TEXT, disease TEXT, days_suffering INTEGER)")
-conn.commit()
-cur.execute("PRAGMA table_info(patients)")
-existing_cols = [r[1] for r in cur.fetchall()]
-required = {
-    "name": "TEXT",
-    "age": "INTEGER",
-    "gender": "TEXT",
-    "district": "TEXT",
-    "disease": "TEXT",
-    "days_suffering": "INTEGER"
-}
-for col, col_type in required.items():
-    if col not in existing_cols:
-        cur.execute(f"ALTER TABLE patients ADD COLUMN {col} {col_type}")
+
+# Create table if not exists
+cur.execute("""
+CREATE TABLE IF NOT EXISTS patients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    age INTEGER,
+    gender TEXT,
+    district TEXT,
+    disease TEXT,
+    days_suffering INTEGER
+)
+""")
 conn.commit()
 
+# Prescription database
 prescriptions = {
     "fever": "Paracetamol 500mg twice a day, stay hydrated, take rest.",
     "cold": "Cetrizine 10mg once daily, steam inhalation, warm fluids.",
@@ -46,8 +46,10 @@ prescriptions = {
     "back pain": "Ibuprofen 400mg, gentle stretching, proper rest."
 }
 
+# App Title
 st.title("Healthcare Prescription System")
 
+# Input Form
 with st.form("patient_form"):
     name = st.text_input("Name")
     age = st.number_input("Age", min_value=0, max_value=120, step=1)
@@ -57,34 +59,35 @@ with st.form("patient_form"):
     days = st.number_input("Days Suffering", min_value=0, step=1)
     submitted = st.form_submit_button("Submit")
 
+# On Form Submit
 if submitted:
-    if not (name.strip() and gender and district.strip() and disease.strip()):
+    if not (name and age and gender and district and disease and (days is not None)):
         st.error("All fields are required!")
     else:
         disease_key = disease.strip().lower()
         try:
             cur.execute("INSERT INTO patients (name, age, gender, district, disease, days_suffering) VALUES (?, ?, ?, ?, ?, ?)",
-                        (name.strip(), int(age), gender, district.strip(), disease_key, int(days)))
+                        (name, age, gender, district, disease_key, days))
             conn.commit()
         except Exception as e:
             st.error("Database error: " + str(e))
         else:
+            # Prescription Logic
             if days > 3:
-                prescription = "You have been suffering for more than 3 days. Please consult a doctor immediately."
+                prescription = "⚠️ You have been suffering for more than 3 days. Please consult a doctor immediately."
             else:
                 prescription = prescriptions.get(disease_key, "No exact match found. Please consult a doctor.")
-            st.success(f"Prescription Generated for {name.strip()}")
-            st.info(f"Disease: {disease.strip().capitalize()}\n\nPrescription: {prescription}")
+            
+            st.success(f"✅ Prescription Generated for {name}")
+            st.info(f"**Disease:** {disease.capitalize()}\n\n**Prescription:** {prescription}")
 
-st.subheader("Patient Records")
-cur.execute("PRAGMA table_info(patients)")
-cols_info = cur.fetchall()
-col_names = [c[1] for c in cols_info] if cols_info else ["ID", "Name", "Age", "Gender", "District", "Disease", "Days Suffering"]
+# Show Patient Records
+st.subheader("📋 Patient Records")
 try:
-    cur.execute("SELECT * FROM patients")
+    cur.execute("SELECT id, name, age, gender, district, disease, days_suffering FROM patients")
     rows = cur.fetchall()
     if rows:
-        df = pd.DataFrame(rows, columns=col_names)
+        df = pd.DataFrame(rows, columns=["ID", "Name", "Age", "Gender", "District", "Disease", "Days Suffering"])
         st.dataframe(df, use_container_width=True)
     else:
         st.write("No patient records yet.")
