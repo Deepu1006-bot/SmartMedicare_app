@@ -1,18 +1,10 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-import traceback
 
 conn = sqlite3.connect("healthcare.db", check_same_thread=False)
 cur = conn.cursor()
 cur.execute("CREATE TABLE IF NOT EXISTS patients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, age INTEGER, gender TEXT, district TEXT, disease TEXT, subtype TEXT, days_suffering INTEGER)")
-conn.commit()
-cur.execute("PRAGMA table_info(patients)")
-existing_cols = [r[1] for r in cur.fetchall()]
-if "subtype" not in existing_cols:
-    cur.execute("ALTER TABLE patients ADD COLUMN subtype TEXT")
-if "days_suffering" not in existing_cols:
-    cur.execute("ALTER TABLE patients ADD COLUMN days_suffering INTEGER")
 conn.commit()
 
 prescriptions = {
@@ -56,24 +48,28 @@ with st.form("patient_form"):
     district = st.text_input("District")
     disease = st.text_input("Disease")
     subtype = ""
-    if disease and disease.strip().lower() == "skin infection":
+    disease_key_preview = disease.strip().lower()
+    if disease_key_preview == "skin infection":
         subtype = st.selectbox("Type of Skin Infection", ["", "Fungal", "Bacterial", "Allergic", "Eczema"])
     days = st.number_input("Days Suffering", min_value=0, step=1)
     submitted = st.form_submit_button("Submit")
 
 if submitted:
-    if not (name and age and gender and district and disease and (days is not None)):
+    if not (name.strip() and gender and district.strip() and disease.strip()):
         st.error("All fields are required!")
     else:
         disease_key = disease.strip().lower()
         subtype_key = subtype.strip().lower() if subtype else None
+        db_ok = True
         try:
             cur.execute("INSERT INTO patients (name, age, gender, district, disease, subtype, days_suffering) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (name, age, gender, district, disease_key, subtype_key, days))
+                        (name.strip(), int(age), gender, district.strip(), disease_key, subtype_key, int(days)))
             conn.commit()
         except Exception as e:
             st.error("Database error: " + str(e))
-        else:
+            db_ok = False
+
+        if db_ok:
             if days > 3:
                 prescription = "You have been suffering for more than 3 days. Please consult a doctor immediately."
             else:
@@ -84,9 +80,9 @@ if submitted:
                         prescription = "Please specify the type of skin infection for an accurate recommendation."
                 else:
                     prescription = prescriptions.get(disease_key, "No exact match found. Please consult a doctor.")
-            st.success(f"Prescription Generated for {name}")
             display_sub = f" ({subtype.capitalize()})" if subtype else ""
-            st.info(f"Disease: {disease.capitalize()}{display_sub}\n\nPrescription: {prescription}")
+            st.success(f"Prescription Generated for {name.strip()}")
+            st.info(f"Disease: {disease.strip().capitalize()}{display_sub}\n\nPrescription: {prescription}")
 
 st.subheader("Patient Records")
 try:
@@ -99,4 +95,3 @@ try:
         st.write("No patient records yet.")
 except Exception as e:
     st.error("Error reading records: " + str(e))
-    st.write(traceback.format_exc())
