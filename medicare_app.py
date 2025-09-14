@@ -1,23 +1,20 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import traceback
 
-# Connect to database
-conn = sqlite3.connect("healthcare.db")
+conn = sqlite3.connect("healthcare.db", check_same_thread=False)
 cur = conn.cursor()
-cur.execute('''CREATE TABLE IF NOT EXISTS patients (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    age INTEGER,
-    gender TEXT,
-    district TEXT,
-    disease TEXT,
-    subtype TEXT,
-    days_suffering INTEGER
-)''')
+cur.execute("CREATE TABLE IF NOT EXISTS patients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, age INTEGER, gender TEXT, district TEXT, disease TEXT, subtype TEXT, days_suffering INTEGER)")
+conn.commit()
+cur.execute("PRAGMA table_info(patients)")
+existing_cols = [r[1] for r in cur.fetchall()]
+if "subtype" not in existing_cols:
+    cur.execute("ALTER TABLE patients ADD COLUMN subtype TEXT")
+if "days_suffering" not in existing_cols:
+    cur.execute("ALTER TABLE patients ADD COLUMN days_suffering INTEGER")
 conn.commit()
 
-# Prescription database
 prescriptions = {
     "fever": "Paracetamol 500mg twice a day, stay hydrated, take rest.",
     "cold": "Cetrizine 10mg once daily, steam inhalation, warm fluids.",
@@ -43,7 +40,6 @@ prescriptions = {
     "back pain": "Ibuprofen 400mg, gentle stretching, proper rest."
 }
 
-# Skin infection subtypes
 skin_infection_prescriptions = {
     "fungal": "Apply antifungal cream (Clotrimazole), keep area dry, avoid tight clothes.",
     "bacterial": "Apply antibacterial ointment (Mupirocin), maintain hygiene.",
@@ -51,7 +47,6 @@ skin_infection_prescriptions = {
     "eczema": "Moisturizing cream, mild steroid cream if prescribed, avoid scratching."
 }
 
-# Streamlit UI
 st.title("Healthcare Prescription System")
 
 with st.form("patient_form"):
@@ -60,47 +55,48 @@ with st.form("patient_form"):
     gender = st.selectbox("Gender", ["", "Male", "Female", "Other"])
     district = st.text_input("District")
     disease = st.text_input("Disease")
-    
-    # Extra input for skin infection
     subtype = ""
-    if disease.strip().lower() == "skin infection":
+    if disease and disease.strip().lower() == "skin infection":
         subtype = st.selectbox("Type of Skin Infection", ["", "Fungal", "Bacterial", "Allergic", "Eczema"])
-    
     days = st.number_input("Days Suffering", min_value=0, step=1)
     submitted = st.form_submit_button("Submit")
 
 if submitted:
-    if not (name and age and gender and district and disease and days):
-        st.error("⚠️ All fields are required!")
+    if not (name and age and gender and district and disease and (days is not None)):
+        st.error("All fields are required!")
     else:
         disease_key = disease.strip().lower()
         subtype_key = subtype.strip().lower() if subtype else None
-
-        cur.execute("INSERT INTO patients (name, age, gender, district, disease, subtype, days_suffering) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (name, age, gender, district, disease_key, subtype_key, days))
-        conn.commit()
-
-        if days > 3:
-            prescription = "⚠️ You have been suffering for more than 3 days. Please consult a doctor immediately."
+        try:
+            cur.execute("INSERT INTO patients (name, age, gender, district, disease, subtype, days_suffering) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (name, age, gender, district, disease_key, subtype_key, days))
+            conn.commit()
+        except Exception as e:
+            st.error("Database error: " + str(e))
         else:
-            if disease_key == "skin infection":
-                if subtype_key and subtype_key in skin_infection_prescriptions:
-                    prescription = skin_infection_prescriptions[subtype_key]
-                else:
-                    prescription = "Please specify the type of skin infection for accurate prescription."
+            if days > 3:
+                prescription = "You have been suffering for more than 3 days. Please consult a doctor immediately."
             else:
-                prescription = prescriptions.get(disease_key, "No exact match found. Please consult a doctor.")
+                if disease_key == "skin infection":
+                    if subtype_key and subtype_key in skin_infection_prescriptions:
+                        prescription = skin_infection_prescriptions[subtype_key]
+                    else:
+                        prescription = "Please specify the type of skin infection for an accurate recommendation."
+                else:
+                    prescription = prescriptions.get(disease_key, "No exact match found. Please consult a doctor.")
+            st.success(f"Prescription Generated for {name}")
+            display_sub = f" ({subtype.capitalize()})" if subtype else ""
+            st.info(f"Disease: {disease.capitalize()}{display_sub}\n\nPrescription: {prescription}")
 
-        st.success(f"✅ Prescription Generated for {name}")
-        st.info(f"**Disease:** {disease.capitalize()} {('('+subtype.capitalize()+')') if subtype else ''}\n\n**Prescription:** {prescription}")
-
-# Show patient records
-st.subheader("📋 Patient Records")
-cur.execute("SELECT * FROM patients")
-rows = cur.fetchall()
-
-if rows:
-    df = pd.DataFrame(rows, columns=["ID", "Name", "Age", "Gender", "District", "Disease", "Subtype", "Days Suffering"])
-    st.dataframe(df, use_container_width=True)
-else:
-    st.write("No patient records yet.")
+st.subheader("Patient Records")
+try:
+    cur.execute("SELECT * FROM patients")
+    rows = cur.fetchall()
+    if rows:
+        df = pd.DataFrame(rows, columns=["ID", "Name", "Age", "Gender", "District", "Disease", "Subtype", "Days Suffering"])
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.write("No patient records yet.")
+except Exception as e:
+    st.error("Error reading records: " + str(e))
+    st.write(traceback.format_exc())
